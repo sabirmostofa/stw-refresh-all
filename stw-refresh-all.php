@@ -1,7 +1,7 @@
 <?php
 /*
   Plugin Name: ShrinkTheWeb Refresh All
-  Version: 1.0
+  Version: 1.1
   Plugin URI:
   Author: Sabirul Mostofa
   Author URI: https://github.com/sabirmostofa
@@ -132,17 +132,66 @@ class stwRefreshAll {
         <?php
         // start a refresh request
         if (isset($_POST['refresh_now'])) {
+			if(!$this->has_plugin && !$this->has_theme){
+				echo "<br/><b> Neither STW Plugin nor Directorypress is activated </b> <br/> No thumbnails to refresh!";
+				return;
+			}
+			
+			if(!$this->has_stw_credential()){
+				echo "<br/><b> STW Access key or Secret isn't set in STW plugin or Directorypress theme </b> <br/> ";
+				return;
+			}
+
+			
             if (wp_verify_nonce($_POST['stw_nonce_start'], 'stw_back_nonce'))
                 $this->start_refresh();
             $recs = $wpdb->get_var("select count(*) from $this->table");
 
-
-
+				
+				
             echo "<br/><b>Total Thumbnails to be refreshed: $recs</b> <br/> The refresh action will be running in the background";
         }
 
         echo "</div>";
     }
+    
+    function has_stw_credential(){
+		//var_dump(SECRET_KEY);
+		
+		if($this->has_plugin_credential())
+				return true;
+		
+		if($this ->has_theme){
+			if( (ACCESS_KEY  == '') || (SECRET_KEY == '') ){
+				// try to get from plugin
+				if($this->has_plugin_credential())
+					return true;
+				else
+					return false;
+			}else{
+				return true;
+				}
+		}
+
+	 
+			
+		
+		}
+		
+		function has_plugin_credential(){
+			
+			if($this->has_plugin){		
+				$allSettings = TidySettings_getSettings(STWWT_SETTINGS_KEY);
+				if(($allSettings['stwwt_access_id'] == false ) || ($allSettings['stwwt_secret_id'] == '' ))
+					return false;
+				else 
+					return true;
+			}
+			
+			return false;	 
+
+			
+			}
 
     //cron schedules
 
@@ -351,8 +400,11 @@ class stwRefreshAll {
     //collect links and insert in db
     function find_insert_db() {
         global $wpdb;
+        $links_theme = array();
+        $links_plugin = array();
 
         // get all directorypress urls
+        if($this -> has_theme)
         $links_theme = $wpdb->get_col($wpdb->prepare(
                         "
 	SELECT      Distinct(meta_value) as meta_value
@@ -378,7 +430,7 @@ class stwRefreshAll {
         );
 
 
-        $links_plugin = array();
+        
 
 //searching for the thumb shortcode
         foreach ($contents as $con) {
@@ -401,6 +453,8 @@ class stwRefreshAll {
 
         //var_dump($links_plugin);
         //$this->refresh_request(array($links_theme, $links_plugin));
+        if(!$this -> has_plugin) 
+			$links_plugin = array();
         $this->write_in_db(array($links_theme, $links_plugin));
     }
 
