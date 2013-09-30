@@ -21,7 +21,7 @@ class stwRefreshAll {
     public $f_clinks = '';
     public $table = '';
     //links to refresh in a cycle
-    public $limit = 15;
+    public $limit = 1;
 
     function __construct() {
         global $wpdb;
@@ -29,6 +29,7 @@ class stwRefreshAll {
         add_action('plugins_loaded', array($this, 'init_vars'));
         add_action('plugins_loaded', array($this, 'do_refresh_rest'));
         add_action('wpstw_cron', array($this, 'start_refresh'));
+        add_action('stw_cron_cache', array($this, 'delete_cache'));
         //add_action('init', array($this, 'refresh_action'));	
         add_action('admin_menu', array($this, 'CreateMenu'), 50);
         add_filter('cron_schedules', array($this, 'cron_scheds'));
@@ -54,7 +55,7 @@ class stwRefreshAll {
     }
 
     function CreateMenu() {
-        add_submenu_page('options-general.php', 'STW Refresh all', 'STW Refresh all', 'activate_plugins', 'stwRefreshAll', array($this, 'OptionsPage'));
+        add_submenu_page('options-general.php', 'STW Refresh All', 'STW Refresh All', 'activate_plugins', 'stwRefreshAll', array($this, 'OptionsPage'));
     }
 
     //schedule cron events
@@ -96,6 +97,7 @@ class stwRefreshAll {
         //var_dump(wp_get_schedule('wpstw_cron'));
         //wp_clear_scheduled_hook('wpstw_cron');		
         //var_dump(wp_get_schedules());
+        //var_dump(wp_next_scheduled('stw_cron_cache'));
         // if cron option is changed reschedule cron
         if (isset($_POST["stw_cron_option"])) {
             update_option('stw_cron_option', $_POST["stw_cron_option"]);
@@ -126,6 +128,13 @@ class stwRefreshAll {
 
             </form>
 
+            <form action="" method ="post">
+                <input type="hidden" name="stw_nonce_start" value="<?php echo wp_create_nonce('stw_back_nonce') ?>" />
+                <br/>
+                <h3> Click the button to clear the cache</h3> 
+                <input class="button-primary" type ="submit" name="clear_cache" value="Clear Cache"/>
+
+            </form>
 
 
 
@@ -149,8 +158,16 @@ class stwRefreshAll {
 
 				
 				
-            echo "<br/><b>Total Thumbnails to be refreshed: $recs</b> <br/> The refresh action will be running in the background";
+            echo "<br/><b>Total Thumbnails to be refreshed: $recs</b> <br/> The refresh action will be running in the background. 
+            <br/> Cache will be deleted automatically after the completion of the refresh process";
         }
+        
+        if(isset($_POST['clear_cache'])){
+			$this->delete_cache();
+			echo "<br/><b>All cached images habe been deleted";
+			
+			
+			}
 
         echo "</div>";
     }
@@ -276,8 +293,8 @@ class stwRefreshAll {
             mysql_query("ALTER TABLE $this->table AUTO_INCREMENT = 1", $d);
             //mysql_close($d);
             //dbDelta("truncate table $this->table");
-
-            $this->delete_cache();
+			//delete cache at end
+           // $this->delete_cache();
             //$wpdb -> print_error();	
             $this->find_insert_db();
 
@@ -326,7 +343,15 @@ class stwRefreshAll {
 
         if (empty($recs)) {
             update_option('stw_doing_refresh', '0');
-            return;
+
+            
+            if (wp_next_scheduled('stw_cron_cache')) 
+				wp_clear_scheduled_hook('stw_cron_cache');
+				
+		// avoiding wordpress limit 10 minutes
+		wp_schedule_single_event( time() + 660, 'stw_cron_cache');
+            
+            exit;
         }
         foreach ($recs as $single) {
             $res = $this->stw_refresh_request($single->url, $single->args);
