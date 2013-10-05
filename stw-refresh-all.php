@@ -5,15 +5,35 @@
   Plugin URI:
   Author: Sabirul Mostofa
   Author URI: https://github.com/sabirmostofa
-  Description: Refresh all the screenshots  at once
+  Description: Refresh all the STW screenshots  at once
   Tags: homepage,website,thumbnail,thumbnails,thumb,screenshot,snapshot,link,links,images,image
+  License: GPLv2
  */
+ 
+ /*
+  Copyright 2013 ShrinkTheWeb
+
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License, version 2, as
+  published by the Free Software Foundation.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
 
 $stwRefreshAll = new stwRefreshAll();
 
 class stwRefreshAll {
 
     public $has_plugin = false;
+    public $has_portfolio_plugin = false;
     public $has_theme = false;
     public $upload_dir = '';
     //log files
@@ -21,7 +41,8 @@ class stwRefreshAll {
     public $f_clinks = '';
     public $table = '';
     //links to refresh in a cycle
-    public $limit = 1;
+    public $limit = 15;
+    public $logo = '';
 
     function __construct() {
         global $wpdb;
@@ -109,6 +130,23 @@ class stwRefreshAll {
         $ro = get_option('stw_cron_option');
         ?>
         <div class="wrap" style="text-align:center">
+			<a href="http://www.shrinktheweb.com/">
+			<img src="<?php echo plugins_url( 'images/stw_logo.jpg' , __FILE__ ) ?>" />
+			</a>
+			<br/>
+			<br/>
+			<div style="width: 500px;margin: 0 auto; color: green; border: 2px solid #C0C0C0">
+			<?php
+			if($this -> has_plugin)
+				echo '<b>STW Plugin detected</span></b><br/>';
+			if($this -> has_theme)
+				echo '<b>Directorypress detected</b><br/>';
+			if($this -> has_portfolio_plugin)
+				echo '<b>Portfolio Plugin detected</b>';
+			
+			?>
+			</div>
+			<br/>
             <h3>Select an option to refresh all the Thumbails from Directorypress and STW plugin </h3> 
             <form action="" method="post" >
                 <select name="stw_cron_option" id="">
@@ -238,10 +276,14 @@ class stwRefreshAll {
         $plugin_dir = dirname(__FILE__);
         $this->f_links = $plugin_dir  . '/stw_links.txt';
         $this->f_clinks = $plugin_dir  . '/stw_clinks.txt';
+        $this->logo = $plugin_dir . '/images/stw_logo.jpg';
 
 
         if (defined('STWWT_VERSION'))
             $this->has_plugin = true;
+            
+        if(function_exists('WPPortfolio_init'))
+			$this->has_portfolio_plugin = true;
 
         $theme = wp_get_theme();
 
@@ -427,6 +469,7 @@ class stwRefreshAll {
         global $wpdb;
         $links_theme = array();
         $links_plugin = array();
+        $links_portfolio = array();
 
         // get all directorypress urls
         if($this -> has_theme)
@@ -442,8 +485,8 @@ class stwRefreshAll {
 
 //var_dump($urls); 
 //exit;
-        // get all plugin urls
-
+        // get all plugin urls only if plugin exists
+if($this->has_plugin):
         $contents = $wpdb->get_col($wpdb->prepare(
                         "
 	SELECT      post_content
@@ -475,12 +518,26 @@ class stwRefreshAll {
         }//exit;
 
         $links_plugin = array_map("unserialize", array_unique(array_map("serialize", $links_plugin)));
+    endif;
+    
+    // start saearch for portfolio links
+    
+    if($this->has_portfolio_plugin):
+    $table = $wpdb->prefix . TABLE_WEBSITES;
+    
+    $links_portfolio = $wpdb->get_col(
+                        "
+	SELECT      siteurl
+	FROM        $table
+	"
+	   );
+ 
+    endif;
 
         //var_dump($links_plugin);
         //$this->refresh_request(array($links_theme, $links_plugin));
-        if(!$this -> has_plugin) 
-			$links_plugin = array();
-        $this->write_in_db(array($links_theme, $links_plugin));
+ 
+        $this->write_in_db(array($links_theme, $links_plugin, $links_portfolio));
     }
 
     // write all the urls in file
@@ -492,6 +549,7 @@ class stwRefreshAll {
 
         $links_theme = $links[0];
         $links_plugin = $links[1];
+        $links_portfolio = $links[2];
         //returns without urls
         $args_theme = $this->theme_get_args();
 
@@ -528,6 +586,26 @@ class stwRefreshAll {
                     ), array('%s', '%s', '%d')
             );
         }
+        
+       //
+       if($this->has_portfolio_plugin):
+       $args_portfolio = $this->portfolio_get_args();
+
+       foreach($links_portfolio as $ur){		
+		   $arg = $args_portfolio;
+		   $arg[] = $ur;
+           $arg = json_encode($arg);
+
+            $wpdb->insert(
+                    $this->table, array(
+                'url' => $ur,
+                'args' => $arg,
+                'last' => 0
+                    ), array('%s', '%s', '%d')
+            );
+		}
+       endif; 
+       //exit;
     }
 
     //delete cache before rereshing
@@ -544,6 +622,20 @@ class stwRefreshAll {
 
         if ($this->has_plugin)
             $this->STWWT_cache_emptyCache_plugin(false);
+            
+            //clear portfolio cache
+        if($this -> has_portfolio_plugin){
+
+			$dir_c= WPPortfolio_getThumbPathActualDir();
+			if ($dir_c) {
+                foreach (glob($dir_c . '*') AS $filename) {
+                    @unlink($filename);
+                }
+			
+		}
+	}
+			
+			
     }
 
 
@@ -650,6 +742,27 @@ class stwRefreshAll {
         // URL (needs to be last)	
         return $args;
     }
+    
+    //get args for the portfolio plugins
+    function portfolio_get_args(){
+		$args = array();
+		   $args["stwaccesskeyid"] = stripslashes(get_option('WPPortfolio_setting_stw_access_key'));     
+		$args["stwu"] 			= stripslashes(get_option('WPPortfolio_setting_stw_secret_key'));
+		
+		$customSize = WPPortfolio_getCustomSizeOption();
+		if($customSize) {
+			$args["stwxmax"] = $customSize;
+		}
+		
+		// No custom size, just do the standard size.
+    	else {
+    		$args["stwsize"] = stripslashes(get_option('WPPortfolio_setting_stw_thumb_size'));
+    	} 
+    	
+    	$args["stwredo"] = 2;   
+    	return $args;	
+		
+		}
 
     function plugin_thumbnail_refresh($la) {
         $args = plugin_get_args($la);
